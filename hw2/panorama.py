@@ -41,10 +41,10 @@ def fit_transform_matrix(p0, p1):
     H = None
     
     #TODO 1 : Calculez la matrice de transformation H.
-    # TODO-BLOC-DEBUT 
+    # TODO-BLOC-DEBUT    
     M = np.zeros((2*p0.shape[0], 9))
-    one = np.ones(4)
-    zero = np.zeros(4)
+    one = np.ones(p0.shape[0])
+    zero = np.zeros(p0.shape[0])
     x0 = p0[:,0]
     y0 = p0[:,1]
     y1 = p1[:,1]
@@ -56,9 +56,8 @@ def fit_transform_matrix(p0, p1):
     M[1::2, : ] = np.array([zero, zero, zero, x0, y0, one, -y1 * x0, -y1 * y0,-y1]).T
 
     s, v, d = np.linalg.svd(M)
-    H = np.array(d[-1]).reshape(3,3)
-       
-    #raise NotImplementedError("TODO 1 : dans panorama.py non implémenté")
+    H = np.array(-d[-1]).reshape(3,3)
+    
     # TODO-BLOC-FIN
 
     return H
@@ -102,10 +101,9 @@ def ransac(keypoints1, keypoints2, matches, n_iters=500, threshold=1):
     #TODO 2 : Implémentez ici la méthode RANSAC pour trouver une transformation robuste
     # entre deux images image1 et image2.
     # TODO-BLOC-DEBUT    
-
-    
     maxi = 0
-    H_best = np.zeros((3,3))
+    kp = [0,0,0,0]
+    H_best = np.zeros((4,2))
     for i in range(n_iters):
         inliers_par_iteration = []
         #1
@@ -122,20 +120,24 @@ def ransac(keypoints1, keypoints2, matches, n_iters=500, threshold=1):
         xpredict = (H1[0,0]*keypoints1[matches1[:,0]][:,0] + H1[0,1]* keypoints1[matches1[:,0]][:,1] + H1[0,2]) / (H1[2,0]*keypoints1[matches1[:,0]][:,0] + H1[2,1]*keypoints1[matches1[:,0]][:,1] + H1[2,2])
         ypredict = (H1[1,0]*keypoints1[matches1[:,0]][:,0] + H1[1,1]* keypoints1[matches1[:,0]][:,1] + H1[1,2]) / (H1[2,0]*keypoints1[matches1[:,0]][:,0] + H1[2,1]*keypoints1[matches1[:,0]][:,1] + H1[2,2])
         predict = np.array([xpredict, ypredict]).T
+        
+
         #3
         actual_coords = keypoints2[matches1[:,1]]
         distances = np.linalg.norm(predict - actual_coords, axis=1)
         distances[indx] = 20000
-
-        inlier_indices = np.where(distances <= np.sqrt(2*(threshold**2)))[0]
+        inlier_indices = np.where(distances < threshold)[0]
         inliers_par_iteration = inlier_indices.tolist()
         
         #4
         if len(inliers_par_iteration) >= maxi:
             max_inliers = inliers_par_iteration
             maxi = len(inliers_par_iteration)
-            H = H1
-
+            H_best = matches[indx]
+      
+    #5
+    H = fit_transform_matrix(keypoints1[matches[max_inliers, 0], : ], keypoints2[matches[max_inliers, 1], : ])
+    
     #raise NotImplementedError("TODO 2 : dans panorama.py non implémenté")       
     # TODO-BLOC-FIN
     
@@ -172,7 +174,7 @@ def get_output_space(imgs, transforms):
         corners = np.array([[0, 0], [0, r], [c, 0], [c, r]])
 
         # transformation homographique des coins          
-        warped_corners = pad(corners.astype(np.float)).dot(H.T).T        
+        warped_corners = pad(corners.astype(float)).dot(H.T).T        
         all_corners.append( unpad( np.divide(warped_corners, warped_corners[2,:] ).T ) )
                           
     # Trouver l'étendue des cadres transformées
@@ -186,7 +188,7 @@ def get_output_space(imgs, transforms):
     output_shape = corner_max - corner_min
     
     # Conversion en nombres entiers avec np.ceil et dtype
-    output_shape = tuple( np.ceil(output_shape).astype(np.int) )
+    output_shape = tuple( np.ceil(output_shape).astype(int) )
     
     # Calcul de l'offset (horz, vert) du coin inférieur du cadre par rapport à l'origine (0,0).
     offset = corner_min
