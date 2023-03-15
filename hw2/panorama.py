@@ -125,7 +125,7 @@ def ransac(keypoints1, keypoints2, matches, n_iters=500, threshold=1):
         #3
         actual_coords = keypoints2[matches1[:,1]]
         distances = np.linalg.norm(predict - actual_coords, axis=1)
-        distances[indx] = 20000
+        
         inlier_indices = np.where(distances < threshold)[0]
         inliers_par_iteration = inlier_indices.tolist()
         
