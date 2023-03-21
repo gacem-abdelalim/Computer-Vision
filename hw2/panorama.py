@@ -45,19 +45,20 @@ def fit_transform_matrix(p0, p1):
     M = np.zeros((2*p0.shape[0], 9))
     one = np.ones(p0.shape[0])
     zero = np.zeros(p0.shape[0])
-    x0 = p0[:,0]
+    
     y0 = p0[:,1]
-    y1 = p1[:,1]
+    x0 = p0[:,0]
     x1 = p1[:,0]
+    y1 = p1[:,1]
 
 
-    M[::2,:] = np.array([x0 ,y0 ,one, zero, zero, zero, -x1 * x0, -x1 * y0,-x1]).T
 
-    M[1::2, : ] = np.array([zero, zero, zero, x0, y0, one, -y1 * x0, -y1 * y0,-y1]).T
+    M[::2, : ] = np.array([zero, zero, zero, x0, y0, one, -y1 * x0, -y1 * y0,-y1]).T
+    M[1::2,:] = np.array([x0 ,y0 ,one, zero, zero, zero, -x1 * x0, -x1 * y0,-x1]).T
 
     s, v, d = np.linalg.svd(M)
-    H = np.array(-d[-1]).reshape(3,3)
-    
+    H = np.array(d[-1]).reshape(3,3)
+    #raise NotImplementedError("TODO 1 : dans panorama.py non implémenté")
     # TODO-BLOC-FIN
 
     return H
@@ -120,12 +121,11 @@ def ransac(keypoints1, keypoints2, matches, n_iters=500, threshold=1):
         xpredict = (H1[0,0]*keypoints1[matches1[:,0]][:,0] + H1[0,1]* keypoints1[matches1[:,0]][:,1] + H1[0,2]) / (H1[2,0]*keypoints1[matches1[:,0]][:,0] + H1[2,1]*keypoints1[matches1[:,0]][:,1] + H1[2,2])
         ypredict = (H1[1,0]*keypoints1[matches1[:,0]][:,0] + H1[1,1]* keypoints1[matches1[:,0]][:,1] + H1[1,2]) / (H1[2,0]*keypoints1[matches1[:,0]][:,0] + H1[2,1]*keypoints1[matches1[:,0]][:,1] + H1[2,2])
         predict = np.array([xpredict, ypredict]).T
-        
 
         #3
         actual_coords = keypoints2[matches1[:,1]]
         distances = np.linalg.norm(predict - actual_coords, axis=1)
-        
+
         inlier_indices = np.where(distances < threshold)[0]
         inliers_par_iteration = inlier_indices.tolist()
         
@@ -135,7 +135,7 @@ def ransac(keypoints1, keypoints2, matches, n_iters=500, threshold=1):
             maxi = len(inliers_par_iteration)
             H_best = matches[indx]
       
-    #5
+      
     H = fit_transform_matrix(keypoints1[matches[max_inliers, 0], : ], keypoints2[matches[max_inliers, 1], : ])
     
     #raise NotImplementedError("TODO 2 : dans panorama.py non implémenté")       
@@ -245,7 +245,80 @@ def warp_image(img, H, output_shape, offset, method=None):
     # fonction (contrôlée avec le paramètre 'method' donné ci-dessus) qui calcule 
     # les coefficients du canal alpha de l'image transformée.
     # TODO-BLOC-DEBUT    
-    raise NotImplementedError("TODO 3/5 : dans panorama.py non implémenté")    
+    H1 = np.linalg.inv(H)
+    img = img.astype(np.float32)/255
+    imgAlpha = np.ones((img.shape[0],img.shape[1],4))
+    imgAlpha[:,:,:-1] = img
+    image_warped = np.zeros((output_shape[1],output_shape[0],4))
+    alpha = np.zeros((image_warped.shape[0], image_warped.shape[1])) 
+    centre_ligne = np.round(img.shape[0] / 2).astype(int)
+    centre_colone = np.round(img.shape[1] / 2).astype(int)
+
+    # Compute the alpha mask
+    if method == 'hlinear':
+
+      line1 = np.linspace(0, 1, centre_colone)
+      line2 = np.linspace(1, 0, centre_colone)
+      imgAlpha[:, :centre_colone, 3] = np.tile(line1, (img.shape[0], 1))
+      imgAlpha[:, centre_colone:, 3] = np.tile(line2, (img.shape[0], 1))
+         
+
+      #alpha = np.tile(cols, (output_shape[0], 1))
+    elif method == 'vlinear':
+      line1 = np.linspace(0, 1, centre_ligne)
+      line2 = np.linspace(1, 0, centre_ligne)
+      imgAlpha[:centre_ligne, :, 3] = np.tile(line1, (img.shape[1], 1)).T
+      imgAlpha[centre_ligne:, :, 3] = np.tile(line2, (img.shape[1], 1)).T
+    elif method == 'linear':
+      alpha1 =  np.zeros((img.shape[0], img.shape[1])) 
+      alpha2 =  np.zeros((img.shape[0], img.shape[1]))  
+      line1 = np.linspace(0, 1, centre_colone)
+      line2 = np.linspace(1, 0, centre_colone)
+      alpha1[:, :centre_colone] = np.tile(line1, (img.shape[0], 1))
+      alpha1[:, centre_colone:] = np.tile(line2, (img.shape[0], 1))
+      line1 = np.linspace(0, 1, centre_ligne)
+      line2 = np.linspace(1, 0, centre_ligne)
+      alpha2[:centre_ligne, :] = np.tile(line1, (img.shape[1], 1)).T
+      alpha2[centre_ligne:, :] = np.tile(line2, (img.shape[1], 1)).T
+      imgAlpha[:,:,3] = alpha1 * alpha2    
+    
+    j_indices, i_indices = np.meshgrid(np.arange(output_shape[1]), np.arange(output_shape[0])) #j-->ligne  i-->colonne
+    j_indices = j_indices.ravel()
+    i_indices = i_indices.ravel()
+    
+    j_translated = (j_indices + offset[1]).astype(int)
+    i_translated = (i_indices + offset[0]).astype(int)
+    
+    pt = np.vstack([i_translated, j_translated, np.ones_like(i_indices)])
+    pt_source = np.dot(H1, pt)
+    
+    u = pt_source[1,:] / pt_source[2,:] #ligne
+    v = pt_source[0,:] / pt_source[2,:] #colone
+    
+    valid_indices = np.logical_and.reduce((u<(img.shape[0]-1), v<(img.shape[1]-1), v>0, u>0))
+    
+    v1 = (np.floor(v[valid_indices])).astype(int)
+    u1 = (np.floor(u[valid_indices])).astype(int)
+    u2 = u1+1
+    v2 = v1+1
+
+    surf_sup_gauche = np.abs((u[valid_indices]-u1)*(v[valid_indices]-v1))
+    surf_sup_droite = np.abs((u2-u[valid_indices])*(v[valid_indices]-v1))
+    surf_inf_gauche = np.abs((u[valid_indices]-u1)*(v2-v[valid_indices]))
+    surf_inf_droite = np.abs((u2-u[valid_indices])*(v2-v[valid_indices]))
+    
+    indices = np.arange(len(valid_indices))[valid_indices]
+    image_warped[j_indices[indices], i_indices[indices], 0] = (surf_sup_gauche) * img[u2,v2,0] + (surf_sup_droite) * img[u1,v2,0] + (surf_inf_gauche) * img[u2,v1,0] + (surf_inf_droite) * img[u1,v1,0]
+    image_warped[j_indices[indices], i_indices[indices], 1] = (surf_sup_gauche) * img[u2,v2,1] + (surf_sup_droite) * img[u1,v2,1] + (surf_inf_gauche) * img[u2,v1,1] + (surf_inf_droite) * img[u1,v1,1]
+    image_warped[j_indices[indices], i_indices[indices], 2] = (surf_sup_gauche) * img[u2,v2,2] + (surf_sup_droite) * img[u1,v2,2] + (surf_inf_gauche) * img[u2,v1,2] + (surf_inf_droite) * img[u1,v1,2]    
+    image_warped[j_indices[indices], i_indices[indices], 3] = (surf_sup_gauche) * imgAlpha[u2,v2,3] + (surf_sup_droite) * imgAlpha[u1,v2,3] + (surf_inf_gauche) * imgAlpha[u2,v1,3] + (surf_inf_droite) * imgAlpha[u1,v1,3]
+
+    mask = image_warped[:, :, 3] > 0
+
+    img_warped = image_warped.astype(np.float32) 
+    
+    img_warped = image_warped
+    #raise NotImplementedError("TODO 3/5 : dans panorama.py non implémenté")    
     # TODO-BLOC-FIN
     
     return img_warped, mask
@@ -273,8 +346,29 @@ def naive_fusion(img1_warped, img2_warped):
     merged = None
     
     #TODO 4 : Implémentez ici la méthode naïve de fusion de deux images en un panorama
-    # TODO-BLOC-DEBUT    
-    raise NotImplementedError("TODO 4 : dans panorama.py non implémenté")    
+    # TODO-BLOC-DEBUT  
+    alp1 = img1_warped[:,:,-1]
+    alpha2 = np.zeros((img2_warped.shape[0],img2_warped.shape[1],3))
+    
+    img = np.array(img1_warped[:,:,:-1] + img2_warped[:,:,:-1])
+    
+    alpha1 = np.zeros((img1_warped.shape[0],img1_warped.shape[1],3))
+    alp2 = img2_warped[:,:,-1]
+    
+    alpha2[:,:,0] = alp2
+    alpha2[:,:,1] = alp2
+    alpha2[:,:,2] = alp2
+
+    alpha1[:,:,0] = alp1
+    alpha1[:,:,1] = alp1
+    alpha1[:,:,2] = alp1
+    
+
+    alpha = alpha1 + alpha2
+    alpha[alpha == 0] = 1
+    
+    merged = img / alpha  
+    #raise NotImplementedError("TODO 4 : dans panorama.py non implémenté")    
     # TODO-BLOC-FIN
 
     return merged
@@ -312,8 +406,35 @@ def fusion(img1_warped, m1, img2_warped, m2):
     merged = None
 
     #TODO 6 : Implémentez ici la méthode de pondération pour la fusion de deux images en un panorama
-    # TODO-BLOC-DEBUT    
-    raise NotImplementedError("TODO 6 : dans panorama.py non implémenté")        
+    # TODO-BLOC-DEBUT
+    merged = np.zeros((img1_warped.shape[0],img1_warped.shape[1],3))    
+
+    m1 = m1.astype(int)
+    m2 = m2.astype(int)
+
+    mask1 = [m1,m1,m1]
+    mask2 = [m2,m2,m2]
+
+    alp1 = img1_warped[:,:,3]
+    alp2 = img2_warped[:,:,3]
+
+    alpha1 = [alp1,alp1,alp1]
+    alpha2 = [alp2,alp2,alp2]
+    alpha1 = np.transpose(alpha1,(1,2,0))
+    alpha2 = np.transpose(alpha2,(1,2,0))
+
+    alpha = np.add(alpha1, alpha2)
+    alpha[alpha == 0] = 1
+    mask1 = np.transpose(mask1,(1,2,0))
+    mask2 = np.transpose(mask2,(1,2,0))
+
+    img1_warped[:,:,:-1] = img1_warped[:,:,:-1] * mask1
+    img2_warped[:,:,:-1] = img2_warped[:,:,:-1] * mask2
+
+    merged = (img1_warped[:,:,:-1] * alpha1 + img2_warped[:,:,:-1] * alpha2) / (alpha)
+    
+
+    #raise NotImplementedError("TODO 6 : dans panorama.py non implémenté")        
     # TODO-BLOC-FIN
 
     return merged
@@ -362,6 +483,7 @@ def stitch_multiple_images(imgs_list, keypoints_list, matches_list, imgref=0, bl
     
     #TODO BONUS : Votre implémentation ici
     # TODO-BLOC-DEBUT    
+    
     raise NotImplementedError("TODO BONUS : dans panorama.py non implémenté")    
     # TODO-BLOC-FIN
     
